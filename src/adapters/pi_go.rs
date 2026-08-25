@@ -85,12 +85,19 @@ impl PiGoAdapter {
             let Ok(event) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
-            let author = string_at(&event, &["Author"]);
+            let author = {
+                let author = string_at(&event, &["author"]);
+                if author.is_empty() {
+                    string_at(&event, &["Author"])
+                } else {
+                    author
+                }
+            };
             if author != "user" && author != "pi" {
                 continue;
             }
-            let texts: Vec<String> = event
-                .get("Content")
+            let content = event.get("content").or_else(|| event.get("Content"));
+            let texts: Vec<String> = content
                 .and_then(|content| content.get("parts"))
                 .and_then(Value::as_array)
                 .into_iter()
@@ -233,6 +240,30 @@ mod tests {
             .next();
         assert!(session.is_none());
         write_session(&temp);
+        let session = PiGoAdapter::new(temp.path().to_path_buf())
+            .find_sessions()
+            .remove(0);
+        assert_eq!(session.agent, "pi-go");
+        assert_eq!(session.title, "Fix the parser");
+        assert!(session.content.contains("Done"));
+        assert!(!session.content.contains("functionCall"));
+    }
+
+    #[test]
+    fn parses_lowercase_event_keys() {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path().join("260825-0747-test");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("meta.json"),
+            r#"{"id":"260825-0747-test","workDir":"/repo/app","updatedAt":"2026-08-25T07:47:16+02:00"}"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("events.jsonl"),
+            "{\"author\":\"user\",\"content\":{\"parts\":[{\"text\":\"Fix the parser\"}],\"role\":\"user\"}}\n{\"author\":\"pi\",\"content\":{\"parts\":[{\"text\":\"Done\"},{\"functionCall\":{}}],\"role\":\"model\"}}\n",
+        )
+        .unwrap();
         let session = PiGoAdapter::new(temp.path().to_path_buf())
             .find_sessions()
             .remove(0);

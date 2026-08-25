@@ -79,6 +79,28 @@ fn write_pi_session(home: &Path, id: &str, directory: &str, prompt: &str) -> Pat
     session_file
 }
 
+fn write_pi_go_session(home: &Path, id: &str, directory: &str, prompt: &str) -> PathBuf {
+    let session_dir = home.join(".pi-go/sessions").join(id);
+    fs::create_dir_all(&session_dir).unwrap();
+    fs::write(
+        session_dir.join("meta.json"),
+        json!({
+            "id": id,
+            "workDir": directory,
+            "createdAt": "2026-08-25T07:47:11+02:00",
+            "updatedAt": "2026-08-25T07:48:42+02:00"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let rows = [
+        json!({"author": "user", "content": {"parts": [{"text": prompt}], "role": "user"}}),
+        json!({"author": "pi", "content": {"parts": [{"text": "Done"}, {"functionCall": {}}], "role": "model"}}),
+    ];
+    write_jsonl(&session_dir.join("events.jsonl"), &rows);
+    session_dir
+}
+
 fn write_new_agent_sessions(home: &Path) {
     let antigravity_id = "52d82992-7695-4d38-8d02-9747eecba839";
     let antigravity = home
@@ -311,6 +333,29 @@ fn list_footer_counts_filtered_matches() {
     assert!(kimi_stdout.contains("Kimi adapter integration coverage"));
     assert!(!kimi_stdout.contains("pi123"));
     assert!(kimi_stdout.contains("Showing 1 of 1 sessions"));
+}
+
+#[test]
+fn lists_pi_go_sessions_from_lowercase_event_keys() {
+    let temp = TempDir::new().unwrap();
+    write_pi_go_session(
+        temp.path(),
+        "pigo123",
+        "/repo/pi-go",
+        "Pi-go lowercase event coverage",
+    );
+
+    let (list_stdout, list_stderr) = assert_success(run_fr(temp.path(), &["--list"]));
+    assert!(list_stderr.is_empty());
+    assert!(list_stdout.contains("pi-go"));
+    assert!(list_stdout.contains("Pi-go lowercase event coverage"));
+    assert!(list_stdout.contains("/repo/pi-go"));
+    assert!(list_stdout.contains("pigo123"));
+    assert!(list_stdout.contains("Showing 1 of 1 sessions"));
+
+    let (agent_stdout, _) = assert_success(run_fr(temp.path(), &["--list", "agent:pi-go"]));
+    assert!(agent_stdout.contains("pigo123"));
+    assert!(agent_stdout.contains("Showing 1 of 1 sessions"));
 }
 
 #[test]
