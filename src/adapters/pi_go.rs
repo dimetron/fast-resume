@@ -9,8 +9,8 @@ use crate::config;
 use crate::model::{RawAdapterStats, Session, file_mtime_seconds, file_timestamp, truncate_title};
 
 use super::shared::{
-    IncrementalParse, failed_incremental_scan, incremental_from_files,
-    incremental_from_files_streaming, parse_datetime, raw_stats_for_tree, string_at,
+    IncrementalParse, SessionFileScan, failed_incremental_scan, incremental_scan, parse_datetime,
+    raw_stats_for_tree, string_at,
 };
 use super::{Adapter, IncrementalScan, KnownSessions, SessionCallback};
 
@@ -146,6 +146,23 @@ impl PiGoAdapter {
         }
         super::shared::incremental_parse_jsonl(&events, || self.parse_session(dir))
     }
+    fn incremental(
+        &self,
+        known: &KnownSessions,
+        on_session: Option<&mut SessionCallback<'_>>,
+    ) -> IncrementalScan {
+        let Some((dirs, complete)) = self.scan_session_dirs() else {
+            return failed_incremental_scan(self.name());
+        };
+        let scanned: SessionFileScan = (dirs, complete);
+        incremental_scan(
+            self.name(),
+            known,
+            Some(scanned),
+            |dir| self.parse_session_incremental(dir),
+            on_session,
+        )
+    }
 }
 
 impl Adapter for PiGoAdapter {
@@ -163,16 +180,7 @@ impl Adapter for PiGoAdapter {
     }
 
     fn find_sessions_incremental(&self, known: &KnownSessions) -> IncrementalScan {
-        let Some((dirs, complete)) = self.scan_session_dirs() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files(self.name(), known, dirs, |dir| {
-            self.parse_session_incremental(dir)
-        });
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, None)
     }
 
     fn find_sessions_incremental_streaming(
@@ -180,20 +188,7 @@ impl Adapter for PiGoAdapter {
         known: &KnownSessions,
         on_session: &mut SessionCallback<'_>,
     ) -> IncrementalScan {
-        let Some((dirs, complete)) = self.scan_session_dirs() else {
-            return failed_incremental_scan(self.name());
-        };
-        let mut scan = incremental_from_files_streaming(
-            self.name(),
-            known,
-            dirs,
-            |dir| self.parse_session_incremental(dir),
-            on_session,
-        );
-        if !complete {
-            scan.deleted_ids.clear();
-        }
-        scan
+        self.incremental(known, Some(on_session))
     }
 
     fn resume_command(&self, session: &Session, _yolo: bool) -> Vec<String> {
